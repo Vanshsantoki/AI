@@ -1,0 +1,87 @@
+import re
+
+# ---------- CNF Conversion Helpers ----------
+def eliminate_implications(sentence):
+    # Replace → with equivalent ¬P ∨ Q
+    return re.sub(r'\(([^)]+)\)\s*->\s*\(([^)]+)\)', r'(¬\1 ∨ \2)', sentence)
+
+def move_negation_inwards(sentence):
+    # Simplify double negations
+    sentence = sentence.replace("¬¬", "")
+    return sentence
+
+def distribute_or_over_and(sentence):
+    # (A ∨ (B ∧ C)) => (A ∨ B) ∧ (A ∨ C)
+    if "∧" in sentence and "∨" in sentence:
+        # naive handling for demonstration
+        parts = re.split(r'∧', sentence)
+        return [p.strip() for p in parts]
+    return [sentence]
+
+def to_cnf(sentence):
+    sentence = eliminate_implications(sentence)
+    sentence = move_negation_inwards(sentence)
+    return distribute_or_over_and(sentence)
+
+# ---------- Resolution Logic ----------
+def resolve(ci, cj):
+    resolvents = set()
+    for di in ci:
+        for dj in cj:
+            if di == f"¬{dj}" or dj == f"¬{di}":
+                new_clause = (ci - {di}) | (cj - {dj})
+                resolvents.add(frozenset(new_clause))
+    return resolvents
+
+def fol_resolution(KB, query):
+    negated_query = {f"¬{query}"}
+    clauses = [set(c) for c in KB] + [negated_query]
+    
+    print("\nInitial Knowledge Base and Negated Query:")
+    for c in clauses:
+        print(" ", c)
+    
+    while True:
+        new_clauses = set()
+        for i in range(len(clauses)):
+            for j in range(i + 1, len(clauses)):
+                resolvents = resolve(clauses[i], clauses[j])
+                if frozenset() in resolvents:
+                    print("\nEmpty clause derived → Contradiction found!")
+                    return True
+                new_clauses |= resolvents
+        if new_clauses.issubset(set(map(frozenset, clauses))):
+            return False
+        clauses += list(new_clauses)
+
+# ---------- Main Driver ----------
+def main():
+    print("Enter the number of FOL statements in the Knowledge Base:")
+    n = int(input("n = "))
+    fol_statements = []
+    for i in range(n):
+        s = input(f"FOL {i+1}: ")
+        fol_statements.append(s)
+
+    print("\nConverting to CNF form...")
+    KB = []
+    for s in fol_statements:
+        cnf_clauses = to_cnf(s)
+        for clause in cnf_clauses:
+            # Split by OR symbol ∨ or |
+            literals = [lit.strip() for lit in re.split(r'∨|\|', clause)]
+            KB.append(set(literals))
+            print(" CNF Clause:", set(literals))
+    
+    query = input("\nEnter the query to prove: ")
+    
+    result = fol_resolution(KB, query)
+    print("\nResult:")
+    if result:
+        print("✅ Query Proven by Resolution.")
+    else:
+        print("❌ Query Not Proven.")
+
+# Run program
+if __name__ == "__main__":
+    main()
