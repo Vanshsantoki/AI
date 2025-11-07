@@ -1,0 +1,142 @@
+from copy import deepcopy
+
+# ---------- UNIFICATION ----------
+def is_variable(x):
+    return isinstance(x, str) and x[0].islower()
+
+def is_compound(x):
+    return isinstance(x, tuple) and len(x) > 1
+
+def get_functor(x):
+    return x[0]
+
+def get_args(x):
+    return x[1:]
+
+def occurs_check(var, x, theta):
+    if var == x:
+        return True
+    elif is_variable(x) and x in theta:
+        return occurs_check(var, theta[x], theta)
+    elif is_compound(x):
+        return any(occurs_check(var, arg, theta) for arg in get_args(x))
+    return False
+
+def unify(x, y, theta=None):
+    if theta is None:
+        theta = {}
+    if theta is False:
+        return False
+    elif x == y:
+        return theta
+    elif is_variable(x):
+        return unify_var(x, y, theta)
+    elif is_variable(y):
+        return unify_var(y, x, theta)
+    elif is_compound(x) and is_compound(y):
+        if get_functor(x) != get_functor(y) or len(get_args(x)) != len(get_args(y)):
+            return False
+        return unify(get_args(x), get_args(y), theta)
+    elif isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
+        if len(x) != len(y):
+            return False
+        if not x:
+            return theta
+        first_unify = unify(x[0], y[0], theta)
+        return unify(x[1:], y[1:], first_unify)
+    else:
+        return False
+
+def unify_var(var, x, theta):
+    if var in theta:
+        return unify(theta[var], x, theta)
+    elif is_variable(x) and x in theta:
+        return unify(var, theta[x], theta)
+    elif occurs_check(var, x, theta):
+        return False
+    else:
+        new_theta = deepcopy(theta)
+        new_theta[var] = x
+        return new_theta
+
+# ---------- FORWARD CHAINING ----------
+def substitute(expr, theta):
+    if isinstance(expr, str):
+        return theta.get(expr, expr)
+    elif isinstance(expr, tuple):
+        return tuple(substitute(arg, theta) for arg in expr)
+    return expr
+
+def forward_chain(KB, query):
+    known_facts = set(KB['facts'])
+    rules = KB['rules']
+    new_inferred = True
+
+    print("\nInitial Facts:", known_facts)
+
+    while new_inferred:
+        new_inferred = False
+        for premises, conclusion in rules:
+            for theta in match_rule(premises, known_facts):
+                new_fact = substitute(conclusion, theta)
+                if new_fact not in known_facts:
+                    print("Derived:", new_fact)
+                    known_facts.add(new_fact)
+                    new_inferred = True
+                if unify(new_fact, query) is not False:
+                    print("\n✅ Query", query, "proved!")
+                    return True
+    print("\n❌ Query", query, "cannot be proved.")
+    return False
+
+def match_rule(premises, facts):
+    if not premises:
+        return [{}]
+    first, rest = premises[0], premises[1:]
+    matches = []
+    for fact in facts:
+        theta = unify(first, fact)
+        if theta is not False:
+            for theta_rest in match_rule([substitute(p, theta) for p in rest], facts):
+                merged = deepcopy(theta)
+                merged.update(theta_rest)
+                matches.append(merged)
+    return matches
+
+# ---------- MAIN PROGRAM ----------
+def parse_predicate(s):
+    """Convert 'Human(Socrates)' → ('Human', 'Socrates')"""
+    name, args = s.strip().split('(')
+    args = args.strip(')').split(',')
+    args = tuple(a.strip() for a in args)
+    return (name.strip(), *args)
+
+if __name__ == "__main__":
+    print("=== FORWARD CHAINING INFERENCE ENGINE ===\n")
+
+    # Input facts
+    n = int(input("Enter number of facts: "))
+    facts = set()
+    for i in range(n):
+        fact_str = input(f"Fact {i+1}: ")
+        facts.add(parse_predicate(fact_str))
+
+    # Input rules
+    m = int(input("\nEnter number of rules: "))
+    rules = []
+    for i in range(m):
+        rule_str = input(f"Rule {i+1} (format: Premise1 & Premise2 -> Conclusion): ")
+        lhs, rhs = rule_str.split('->')
+        premises = [parse_predicate(p.strip()) for p in lhs.split('&')]
+        conclusion = parse_predicate(rhs.strip())
+        rules.append((premises, conclusion))
+
+    # Query
+    query_str = input("\nEnter query: ")
+    query = parse_predicate(query_str)
+
+    KB = {'facts': facts, 'rules': rules}
+
+    print("\n--- Starting Inference ---")
+    result = forward_chain(KB, query)
+    print("\nFinal Result:", "✅ Proven" if result else "❌ Not Proven")
