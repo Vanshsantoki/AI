@@ -1,87 +1,127 @@
 import re
 
-# ---------- CNF Conversion Helpers ----------
-def eliminate_implications(sentence):
-    # Replace → with equivalent ¬P ∨ Q
-    return re.sub(r'\(([^)]+)\)\s*->\s*\(([^)]+)\)', r'(¬\1 ∨ \2)', sentence)
+def is_variable(x):
+    return isinstance(x, str) and x and x[0].islower()
 
-def move_negation_inwards(sentence):
-    # Simplify double negations
-    sentence = sentence.replace("¬¬", "")
-    return sentence
 
-def distribute_or_over_and(sentence):
-    # (A ∨ (B ∧ C)) => (A ∨ B) ∧ (A ∨ C)
-    if "∧" in sentence and "∨" in sentence:
-        # naive handling for demonstration
-        parts = re.split(r'∧', sentence)
-        return [p.strip() for p in parts]
-    return [sentence]
+def substitute(expr, subst):
+    """Apply substitution mapping."""
+    if isinstance(expr, list):
+        return [substitute(e, subst) for e in expr]
 
-def to_cnf(sentence):
-    sentence = eliminate_implications(sentence)
-    sentence = move_negation_inwards(sentence)
-    return distribute_or_over_and(sentence)
+    for (var, val) in subst.items():
+        if expr == var:
+            return val
+    return expr
 
-# ---------- Resolution Logic ----------
+
+def unify(x, y, subst=None):
+    """Unification algorithm."""
+    if subst is None:
+        subst = {}
+
+    if x == y:
+        return subst
+
+    if is_variable(x):
+        return unify_var(x, y, subst)
+
+    if is_variable(y):
+        return unify_var(y, x, subst)
+
+    if isinstance(x, list) and isinstance(y, list):
+        if len(x) != len(y) or x[0] != y[0]:
+            return None
+        for i in range(1, len(x)):
+            subst = unify(substitute(x[i], subst), substitute(y[i], subst), subst)
+            if subst is None:
+                return None
+        return subst
+
+    return None
+
+
+def unify_var(var, x, subst):
+    if var in subst:
+        return unify(subst[var], x, subst)
+    elif isinstance(x, str) and x in subst:
+        return unify(var, subst[x], subst)
+    elif occur_check(var, x, subst):
+        return None
+    else:
+        subst[var] = x
+        return subst
+
+
+def occur_check(var, x, subst):
+    """Occurs check to prevent infinite loops."""
+    if var == x:
+        return True
+    elif isinstance(x, list):
+        return any(occur_check(var, xi, subst) for xi in x)
+    elif isinstance(x, str) and x in subst:
+        return occur_check(var, subst[x], subst)
+    return False
+
+
+def negate(literal):
+    """Negate a literal."""
+    if literal.startswith('¬'):
+        return literal[1:]
+    return '¬' + literal
+
+
 def resolve(ci, cj):
-    resolvents = set()
+    """Resolve two clauses."""
+    resolvents = []
     for di in ci:
         for dj in cj:
-            if di == f"¬{dj}" or dj == f"¬{di}":
-                new_clause = (ci - {di}) | (cj - {dj})
-                resolvents.add(frozenset(new_clause))
+            if di == negate(dj):
+                new_clause = list(set(ci + cj))
+                new_clause.remove(di)
+                new_clause.remove(dj)
+                resolvents.append(new_clause)
     return resolvents
 
-def fol_resolution(KB, query):
-    negated_query = {f"¬{query}"}
-    clauses = [set(c) for c in KB] + [negated_query]
-    
-    print("\nInitial Knowledge Base and Negated Query:")
-    for c in clauses:
-        print(" ", c)
-    
+
+def pl_resolution(KB, query):
+    """PL resolution algorithm."""
+    clauses = KB + [[negate(query)]]
+    new = set()
+
     while True:
-        new_clauses = set()
-        for i in range(len(clauses)):
-            for j in range(i + 1, len(clauses)):
-                resolvents = resolve(clauses[i], clauses[j])
-                if frozenset() in resolvents:
-                    print("\nEmpty clause derived → Contradiction found!")
-                    return True
-                new_clauses |= resolvents
-        if new_clauses.issubset(set(map(frozenset, clauses))):
+        pairs = [(clauses[i], clauses[j]) for i in range(len(clauses))
+                 for j in range(i + 1, len(clauses))]
+
+        for (ci, cj) in pairs:
+            resolvents = resolve(ci, cj)
+            if [] in resolvents:
+                return True
+            for r in resolvents:
+                new.add(tuple(sorted(r)))
+
+        if new.issubset(set(tuple(sorted(c)) for c in clauses)):
             return False
-        clauses += list(new_clauses)
 
-# ---------- Main Driver ----------
-def main():
-    print("Enter the number of FOL statements in the Knowledge Base:")
-    n = int(input("n = "))
-    fol_statements = []
-    for i in range(n):
-        s = input(f"FOL {i+1}: ")
-        fol_statements.append(s)
+        for c in new:
+            if list(c) not in clauses:
+                clauses.append(list(c))
 
-    print("\nConverting to CNF form...")
-    KB = []
-    for s in fol_statements:
-        cnf_clauses = to_cnf(s)
-        for clause in cnf_clauses:
-            # Split by OR symbol ∨ or |
-            literals = [lit.strip() for lit in re.split(r'∨|\|', clause)]
-            KB.append(set(literals))
-            print(" CNF Clause:", set(literals))
-    
-    query = input("\nEnter the query to prove: ")
-    
-    result = fol_resolution(KB, query)
-    print("\nResult:")
-    if result:
-        print("✅ Query Proven by Resolution.")
-    else:
-        print("❌ Query Not Proven.")
 
-# Run program
-if __name__ == "__main__":
-    main()
+# ---------------------------------------------------------------
+# Example Knowledge Base
+# ---------------------------------------------------------------
+
+KB = [
+    ['¬P', 'Q'],       # P ⇒ Q
+    ['¬L', '¬M', 'P'], # L ∧ M ⇒ P
+    ['L'],             # Fact L
+    ['M']              # Fact M
+]
+
+query = 'Q'
+
+result = pl_resolution(KB, query)
+
+print("Query:", query)
+print("Entailed?", result)
